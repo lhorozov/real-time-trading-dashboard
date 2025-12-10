@@ -1,9 +1,9 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, Express } from 'express';
 import cors from 'cors';
 import { MarketDataSimulator } from './services/MarketDataSimulator';
 
-const app = express();
-const marketData = new MarketDataSimulator();
+const app: Express = express();
+const marketData: MarketDataSimulator = new MarketDataSimulator();
 
 app.use(cors());
 app.use(express.json());
