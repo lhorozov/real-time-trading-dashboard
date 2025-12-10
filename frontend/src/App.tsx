@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Ticker, PriceUpdate } from './types';
 import { api } from './services/api';
 import { WebSocketService } from './services/websocket';
@@ -6,20 +6,24 @@ import { TickerList } from './components/TickerList';
 import { PriceChart } from './components/PriceChart';
 import './App.css';
 
-const wsService = new WebSocketService();
-
 function App() {
   const [tickers, setTickers] = useState<Ticker[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const wsServiceRef = useRef<WebSocketService | null>(null);
 
   useEffect(() => {
+    // Create WebSocket service only once
+    if (!wsServiceRef.current) {
+      wsServiceRef.current = new WebSocketService();
+    }
+
     initializeApp();
 
     return () => {
-      wsService.disconnect();
+      wsServiceRef.current?.disconnect();
     };
   }, []);
 
@@ -37,15 +41,15 @@ function App() {
       }
 
       // Connect to WebSocket
-      await wsService.connect();
+      await wsServiceRef.current?.connect();
       setConnected(true);
 
       // Subscribe to price updates
       const symbols = initialTickers.map(t => t.symbol);
-      wsService.subscribe(symbols);
+      wsServiceRef.current?.subscribe(symbols);
 
       // Listen for price updates
-      wsService.onPriceUpdate(handlePriceUpdate);
+      wsServiceRef.current?.onPriceUpdate(handlePriceUpdate);
 
     } catch (err) {
       setError('Failed to initialize application');
