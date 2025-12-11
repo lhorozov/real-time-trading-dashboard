@@ -45,7 +45,7 @@ describe('MarketDataSimulator', () => {
   });
 
   describe('Price updates', () => {
-    it('should notify subscribers of price updates', (done) => {
+    it('should notify subscribers of price updates', (done: jest.DoneCallback) => {
       let updateReceived = false;
       
       const callback = (update: PriceUpdate) => {
