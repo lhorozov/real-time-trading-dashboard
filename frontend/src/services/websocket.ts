@@ -6,7 +6,12 @@ export class WebSocketService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private subscribers: Set<(update: PriceUpdate) => void> = new Set();
+  private connectionStatusCallbacks: Set<(connected: boolean) => void> = new Set();
   private url: string;
+  private heartbeatInterval: number | null = null;
+  private heartbeatTimeout: number | null = null;
+  private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds
+  private readonly HEARTBEAT_TIMEOUT = 5000; // 5 seconds
 
   constructor(url?: string) {
     this.url = url || import.meta.env.VITE_WS_URL || 'ws://localhost:3002';
@@ -20,6 +25,8 @@ export class WebSocketService {
         this.ws.onopen = () => {
           console.log('WebSocket connected');
           this.reconnectAttempts = 0;
+          this.startHeartbeat();
+          this.notifyConnectionStatus(true);
           resolve();
         };
 
@@ -39,6 +46,8 @@ export class WebSocketService {
 
         this.ws.onclose = () => {
           console.log('WebSocket disconnected');
+          this.stopHeartbeat();
+          this.notifyConnectionStatus(false);
           this.attemptReconnect();
         };
       } catch (error) {
@@ -79,9 +88,47 @@ export class WebSocketService {
       case 'unsubscribed':
         console.log('Unsubscribed from symbols:', message.symbols);
         break;
+      case 'pong':
+        // Received pong response - connection is alive
+        this.resetHeartbeatTimeout();
+        break;
       case 'error':
         console.error('WebSocket error message:', message.error);
         break;
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    
+    this.heartbeatInterval = window.setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'ping' }));
+        
+        // Set timeout - if no pong received, assume disconnected
+        this.heartbeatTimeout = window.setTimeout(() => {
+          console.error('Heartbeat timeout - no pong received, closing connection');
+          this.ws?.close();
+        }, this.HEARTBEAT_TIMEOUT);
+      }
+    }, this.HEARTBEAT_INTERVAL);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    if (this.heartbeatTimeout) {
+      clearTimeout(this.heartbeatTimeout);
+      this.heartbeatTimeout = null;
+    }
+  }
+
+  private resetHeartbeatTimeout(): void {
+    if (this.heartbeatTimeout) {
+      clearTimeout(this.heartbeatTimeout);
+      this.heartbeatTimeout = null;
     }
   }
 
@@ -111,11 +158,24 @@ export class WebSocketService {
     this.subscribers.delete(callback);
   }
 
+  onConnectionStatus(callback: (connected: boolean) => void): void {
+    this.connectionStatusCallbacks.add(callback);
+  }
+
+  offConnectionStatus(callback: (connected: boolean) => void): void {
+    this.connectionStatusCallbacks.delete(callback);
+  }
+
   private notifySubscribers(update: PriceUpdate): void {
     this.subscribers.forEach(callback => callback(update));
   }
 
+  private notifyConnectionStatus(connected: boolean): void {
+    this.connectionStatusCallbacks.forEach(callback => callback(connected));
+  }
+
   disconnect(): void {
+    this.stopHeartbeat();
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
     }
@@ -124,6 +184,7 @@ export class WebSocketService {
       this.ws = null;
     }
     this.subscribers.clear();
+    this.connectionStatusCallbacks.clear();
   }
 
   isConnected(): boolean {

@@ -20,6 +20,9 @@ function App() {
       wsServiceRef.current = new WebSocketService(import.meta.env.VITE_WS_URL);
     }
 
+    // Listen for connection status changes
+    wsServiceRef.current.onConnectionStatus(setConnected);
+
     initializeApp();
 
     return () => {
@@ -28,35 +31,31 @@ function App() {
   }, []);
 
   const initializeApp = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    setLoading(true);
+    setError(null);
 
-      // Load initial tickers
+    // Try to load initial tickers (but don't fail if unavailable)
+    try {
       const initialTickers = await api.getTickers();
       setTickers(initialTickers);
 
       if (initialTickers.length > 0) {
         setSelectedSymbol(initialTickers[0].symbol);
       }
-
-      // Connect to WebSocket
-      await wsServiceRef.current?.connect();
-      setConnected(true);
-
-      // Subscribe to price updates
-      const symbols = initialTickers.map(t => t.symbol);
-      wsServiceRef.current?.subscribe(symbols);
-
-      // Listen for price updates
-      wsServiceRef.current?.onPriceUpdate(handlePriceUpdate);
-
     } catch (err) {
-      setError('Failed to initialize application');
-      console.error('Initialization error:', err);
-    } finally {
-      setLoading(false);
+      console.error('Failed to load initial data:', err);
+      setError('Backend unavailable - WebSocket will keep trying to reconnect...');
     }
+
+    // Always attempt WebSocket connection (independent of REST API)
+    wsServiceRef.current?.connect().catch(() => {
+      console.error('Initial WebSocket connection failed, will retry automatically');
+    });
+
+    // Listen for price updates
+    wsServiceRef.current?.onPriceUpdate(handlePriceUpdate);
+
+    setLoading(false);
   };
 
   const handlePriceUpdate = (update: PriceUpdate) => {
