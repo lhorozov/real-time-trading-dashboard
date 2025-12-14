@@ -17,7 +17,7 @@ function App() {
   useEffect(() => {
     // Create WebSocket service only once
     if (!wsServiceRef.current) {
-      wsServiceRef.current = new WebSocketService();
+      wsServiceRef.current = new WebSocketService(import.meta.env.VITE_WS_URL);
     }
 
     initializeApp();

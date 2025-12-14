@@ -9,7 +9,7 @@ export class WebSocketService {
   private url: string;
 
   constructor(url?: string) {
-    this.url = url || `ws://localhost:3002`;
+    this.url = url || import.meta.env.VITE_WS_URL || 'ws://localhost:3002';
   }
 
   connect(): Promise<void> {
