@@ -5,11 +5,14 @@ describe('MarketDataSimulator', () => {
   let simulator: MarketDataSimulator;
 
   beforeEach(() => {
+    jest.useFakeTimers();
     simulator = new MarketDataSimulator();
   });
 
   afterEach(() => {
     simulator.stopSimulation();
+    jest.clearAllTimers();
+    jest.useRealTimers();
   });
 
   describe('Initialization', () => {
@@ -45,28 +48,25 @@ describe('MarketDataSimulator', () => {
   });
 
   describe('Price updates', () => {
-    it('should notify subscribers of price updates', (done: jest.DoneCallback) => {
+    it('should notify subscribers of price updates', () => {
       let updateReceived = false;
+      let receivedUpdate: PriceUpdate | null = null;
       
       const callback = (update: PriceUpdate) => {
         updateReceived = true;
-        expect(update).toHaveProperty('symbol');
-        expect(update).toHaveProperty('price');
-        expect(update).toHaveProperty('timestamp');
-        simulator.stopSimulation();
-        done();
+        receivedUpdate = update;
       };
 
       simulator.subscribe(callback);
       simulator.startSimulation();
+      
+      // Advance timers to trigger price update
+      jest.advanceTimersByTime(1100);
 
-      // Timeout in case update doesn't arrive
-      setTimeout(() => {
-        if (!updateReceived) {
-          simulator.stopSimulation();
-          done.fail('Price update not received');
-        }
-      }, 5000);
+      expect(updateReceived).toBe(true);
+      expect(receivedUpdate).toHaveProperty('symbol');
+      expect(receivedUpdate).toHaveProperty('price');
+      expect(receivedUpdate).toHaveProperty('timestamp');
     });
 
     it('should allow unsubscribing from updates', () => {
@@ -80,10 +80,9 @@ describe('MarketDataSimulator', () => {
       simulator.unsubscribe(callback);
       simulator.startSimulation();
 
-      setTimeout(() => {
-        expect(callCount).toBe(0);
-        simulator.stopSimulation();
-      }, 2000);
+      // Advance timers to check no callbacks triggered
+      jest.advanceTimersByTime(2000);
+      expect(callCount).toBe(0);
     });
   });
 
