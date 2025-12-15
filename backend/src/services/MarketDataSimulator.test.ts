@@ -60,8 +60,8 @@ describe('MarketDataSimulator', () => {
       simulator.subscribe(callback);
       simulator.startSimulation();
       
-      // Advance timers to trigger price update
-      jest.advanceTimersByTime(1100);
+      // Advance timers to trigger price update (intervals are 1000-3000ms random)
+      jest.advanceTimersByTime(3500);
 
       expect(updateReceived).toBe(true);
       expect(receivedUpdate).toHaveProperty('symbol');
@@ -117,6 +117,113 @@ describe('MarketDataSimulator', () => {
         expect(data.low).toBeLessThanOrEqual(data.open);
         expect(data.low).toBeLessThanOrEqual(data.close);
       });
+    });
+  });
+
+  describe('Caching', () => {
+    it('should cache historical data', () => {
+      const firstCall = simulator.generateHistoricalData('AAPL', 7);
+      const secondCall = simulator.generateHistoricalData('AAPL', 7);
+      
+      // Should return same data (cached)
+      expect(firstCall).toEqual(secondCall);
+    });
+
+    it('should use separate cache for different symbols', () => {
+      const appleData = simulator.generateHistoricalData('AAPL', 7);
+      const teslaData = simulator.generateHistoricalData('TSLA', 7);
+      
+      expect(appleData).not.toEqual(teslaData);
+    });
+
+    it('should use separate cache for different day ranges', () => {
+      const data7days = simulator.generateHistoricalData('AAPL', 7);
+      const data30days = simulator.generateHistoricalData('AAPL', 30);
+      
+      expect(data7days.length).toBe(8);
+      expect(data30days.length).toBe(31);
+      expect(data7days).not.toEqual(data30days);
+    });
+
+    it('should expire cache after TTL', () => {
+      jest.useRealTimers(); // Use real timers for this test
+      
+      const firstCall = simulator.generateHistoricalData('AAPL', 7);
+      
+      // Mock Date.now to simulate 16 minutes passing (1 minute more than TTL)
+      const originalNow = Date.now;
+      const startTime = originalNow();
+      Date.now = jest.fn(() => startTime + 16 * 60 * 1000);
+      
+      const secondCall = simulator.generateHistoricalData('AAPL', 7);
+      
+      // Should be different because cache expired
+      expect(firstCall).not.toEqual(secondCall);
+      
+      // Restore
+      Date.now = originalNow;
+      jest.useFakeTimers();
+    });
+
+    it('should clear specific cache entry', () => {
+      simulator.generateHistoricalData('AAPL', 7);
+      simulator.generateHistoricalData('AAPL', 30);
+      
+      let stats = simulator.getCacheStats();
+      expect(stats.size).toBe(2);
+      expect(stats.entries).toContain('AAPL-7');
+      expect(stats.entries).toContain('AAPL-30');
+      
+      simulator.clearCache('AAPL', 7);
+      
+      stats = simulator.getCacheStats();
+      expect(stats.size).toBe(1);
+      expect(stats.entries).toContain('AAPL-30');
+      expect(stats.entries).not.toContain('AAPL-7');
+    });
+
+    it('should clear all cache entries for a symbol', () => {
+      simulator.generateHistoricalData('AAPL', 7);
+      simulator.generateHistoricalData('AAPL', 30);
+      simulator.generateHistoricalData('TSLA', 7);
+      
+      let stats = simulator.getCacheStats();
+      expect(stats.size).toBe(3);
+      
+      simulator.clearCache('AAPL');
+      
+      stats = simulator.getCacheStats();
+      expect(stats.size).toBe(1);
+      expect(stats.entries).toContain('TSLA-7');
+      expect(stats.entries).not.toContain('AAPL-7');
+      expect(stats.entries).not.toContain('AAPL-30');
+    });
+
+    it('should clear entire cache', () => {
+      simulator.generateHistoricalData('AAPL', 7);
+      simulator.generateHistoricalData('TSLA', 7);
+      simulator.generateHistoricalData('BTC-USD', 30);
+      
+      let stats = simulator.getCacheStats();
+      expect(stats.size).toBe(3);
+      
+      simulator.clearCache();
+      
+      stats = simulator.getCacheStats();
+      expect(stats.size).toBe(0);
+      expect(stats.entries).toEqual([]);
+    });
+
+    it('should provide cache statistics', () => {
+      const stats1 = simulator.getCacheStats();
+      expect(stats1.size).toBe(0);
+      
+      simulator.generateHistoricalData('AAPL', 7);
+      simulator.generateHistoricalData('TSLA', 30);
+      
+      const stats2 = simulator.getCacheStats();
+      expect(stats2.size).toBe(2);
+      expect(stats2.entries).toEqual(['AAPL-7', 'TSLA-30']);
     });
   });
 });

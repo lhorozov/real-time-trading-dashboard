@@ -1,14 +1,22 @@
 import { Ticker, HistoricalPrice, PriceUpdate } from '../types';
 
+interface CacheEntry {
+  data: HistoricalPrice[];
+  timestamp: number;
+}
+
 export class MarketDataSimulator {
   private tickers: Map<string, Ticker>;
   private updateIntervals: Map<string, NodeJS.Timeout>;
   private subscribers: Set<(update: PriceUpdate) => void>;
+  private historicalCache: Map<string, CacheEntry>;
+  private readonly CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
   constructor() {
     this.tickers = new Map();
     this.updateIntervals = new Map();
     this.subscribers = new Set();
+    this.historicalCache = new Map();
     this.initializeTickers();
   }
 
@@ -134,6 +142,15 @@ export class MarketDataSimulator {
     const ticker = this.tickers.get(symbol);
     if (!ticker) return [];
 
+    // Check cache first
+    const cacheKey = `${symbol}-${days}`;
+    const cached = this.historicalCache.get(cacheKey);
+    
+    if (cached && this.isCacheValid(cached.timestamp)) {
+      return cached.data;
+    }
+
+    // Generate new data if not cached or expired
     const historical: HistoricalPrice[] = [];
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
@@ -160,6 +177,42 @@ export class MarketDataSimulator {
       basePrice = close;
     }
 
+    // Store in cache
+    this.historicalCache.set(cacheKey, {
+      data: historical,
+      timestamp: Date.now()
+    });
+
     return historical;
+  }
+
+  private isCacheValid(timestamp: number): boolean {
+    return Date.now() - timestamp < this.CACHE_TTL_MS;
+  }
+
+  public clearCache(symbol?: string, days?: number): void {
+    if (symbol && days !== undefined) {
+      // Clear specific cache entry
+      this.historicalCache.delete(`${symbol}-${days}`);
+    } else if (symbol) {
+      // Clear all entries for a symbol
+      const keysToDelete: string[] = [];
+      this.historicalCache.forEach((_, key) => {
+        if (key.startsWith(`${symbol}-`)) {
+          keysToDelete.push(key);
+        }
+      });
+      keysToDelete.forEach(key => this.historicalCache.delete(key));
+    } else {
+      // Clear entire cache
+      this.historicalCache.clear();
+    }
+  }
+
+  public getCacheStats(): { size: number; entries: string[] } {
+    return {
+      size: this.historicalCache.size,
+      entries: Array.from(this.historicalCache.keys())
+    };
   }
 }
