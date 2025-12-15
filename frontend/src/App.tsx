@@ -21,7 +21,26 @@ function App() {
     }
 
     // Listen for connection status changes
-    wsServiceRef.current.onConnectionStatus(setConnected);
+    wsServiceRef.current.onConnectionStatus((isConnected) => {
+      setConnected(isConnected);
+      // Clear error and reload data when successfully connected
+      if (isConnected) {
+        setError(null);
+        
+        // Subscribe to all symbols on reconnect
+        api.getTickers()
+          .then(tickerList => {
+            const symbols = tickerList.map(t => t.symbol);
+            wsServiceRef.current?.subscribe(symbols);
+            
+            // Update tickers if we don't have any
+            if (tickers.length === 0) {
+              setTickers(tickerList);
+            }
+          })
+          .catch(err => console.error('Failed to load tickers after reconnect:', err));
+      }
+    });
 
     initializeApp();
 
@@ -48,9 +67,18 @@ function App() {
     }
 
     // Always attempt WebSocket connection (independent of REST API)
-    wsServiceRef.current?.connect().catch(() => {
+    try {
+      await wsServiceRef.current?.connect();
+      
+      // Subscribe to all ticker symbols after connecting
+      const symbols = tickers.length > 0 
+        ? tickers.map(t => t.symbol) 
+        : ['AAPL', 'TSLA', 'BTC-USD', 'GOOGL', 'MSFT'];
+      
+      wsServiceRef.current?.subscribe(symbols);
+    } catch (err) {
       console.error('Initial WebSocket connection failed, will retry automatically');
-    });
+    }
 
     // Listen for price updates
     wsServiceRef.current?.onPriceUpdate(handlePriceUpdate);
