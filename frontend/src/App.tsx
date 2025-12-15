@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Ticker, PriceUpdate } from './types';
 import { api } from './services/api';
 import { WebSocketService } from './services/websocket';
@@ -14,6 +14,23 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const wsServiceRef = useRef<WebSocketService | null>(null);
 
+  const handleConnectionChange = useCallback((isConnected: boolean) => {
+    setConnected(isConnected);
+    
+    if (isConnected) {
+      setError(null);
+      
+      // Subscribe to all symbols and refresh tickers
+      api.getTickers()
+        .then(tickerList => {
+          const symbols = tickerList.map(t => t.symbol);
+          wsServiceRef.current?.subscribe(symbols);
+          setTickers(prevTickers => prevTickers.length === 0 ? tickerList : prevTickers);
+        })
+        .catch(err => console.error('Failed to load tickers after reconnect:', err));
+    }
+  }, []);
+
   useEffect(() => {
     // Create WebSocket service only once
     if (!wsServiceRef.current) {
@@ -21,33 +38,14 @@ function App() {
     }
 
     // Listen for connection status changes
-    wsServiceRef.current.onConnectionStatus((isConnected) => {
-      setConnected(isConnected);
-      // Clear error and reload data when successfully connected
-      if (isConnected) {
-        setError(null);
-        
-        // Subscribe to all symbols on reconnect
-        api.getTickers()
-          .then(tickerList => {
-            const symbols = tickerList.map(t => t.symbol);
-            wsServiceRef.current?.subscribe(symbols);
-            
-            // Update tickers if we don't have any
-            if (tickers.length === 0) {
-              setTickers(tickerList);
-            }
-          })
-          .catch(err => console.error('Failed to load tickers after reconnect:', err));
-      }
-    });
+    wsServiceRef.current.onConnectionStatus(handleConnectionChange);
 
     initializeApp();
 
     return () => {
       wsServiceRef.current?.disconnect();
     };
-  }, []);
+  }, [handleConnectionChange]);
 
   const initializeApp = async () => {
     setLoading(true);
@@ -67,15 +65,9 @@ function App() {
     }
 
     // Always attempt WebSocket connection (independent of REST API)
+    // Note: subscription happens in handleConnectionChange when connected
     try {
       await wsServiceRef.current?.connect();
-      
-      // Subscribe to all ticker symbols after connecting
-      const symbols = tickers.length > 0 
-        ? tickers.map(t => t.symbol) 
-        : ['AAPL', 'TSLA', 'BTC-USD', 'GOOGL', 'MSFT'];
-      
-      wsServiceRef.current?.subscribe(symbols);
     } catch (err) {
       console.error('Initial WebSocket connection failed, will retry automatically');
     }
@@ -91,14 +83,15 @@ function App() {
       prevTickers.map(ticker => {
         if (ticker.symbol === update.symbol) {
           const oldPrice = ticker.price;
-          const change = update.price - oldPrice;
-          const changePercent = (change / oldPrice) * 100;
+          const newPrice = update.price;
+          const change = newPrice - oldPrice;
+          const changePercent = oldPrice !== 0 ? (change / oldPrice) * 100 : 0;
 
           return {
             ...ticker,
-            price: update.price,
-            change,
-            changePercent,
+            price: newPrice,
+            change: parseFloat(change.toFixed(2)),
+            changePercent: parseFloat(changePercent.toFixed(2)),
             timestamp: update.timestamp
           };
         }
